@@ -172,6 +172,35 @@ The configuration lives in `~/.config/winvm-launcher/config` (permissions `600`)
 5. **RDP client** — starts KRDC or FreeRDP with the stored credentials and the options above.
 6. **Idle watcher** — once the client is closed, a detached process checks every 20 seconds for established TCP connections to the VM's RDP port. When there are none for `IDLE_MINUTES`, it pauses or managed-saves the VM. Opening a new session cancels it.
 
+## Host shutdown and reboot
+
+**The script does nothing when the host shuts down or reboots.** It only suspends the VM from its idle watcher, which is a normal user process. What happens to the VM when the PC goes down is decided by libvirt, so set that up once.
+
+| Situation at host shutdown | Result |
+|---|---|
+| `libvirt-guests` is **not** enabled | QEMU is killed like a power cut. A VM suspended with `pause` loses its RAM state and the next launch is a cold boot from a possibly unclean disk. |
+| `libvirt-guests` is enabled with `ON_SHUTDOWN=suspend` | Running VMs get a managed save to disk and are restored by the next `winvm-launcher launch`. |
+| `libvirt-guests` is enabled with `ON_SHUTDOWN=shutdown` | Windows is shut down cleanly (takes longer; set `SHUTDOWN_TIMEOUT`). |
+| VM already suspended with `SUSPEND_MODE=managedsave` | Its state is already on disk, so it survives a reboot with no extra setup. |
+
+Recommended setup for `qemu:///system`:
+
+```bash
+sudo systemctl enable --now libvirt-guests
+```
+
+and in its config file (`/etc/libvirt/libvirt-guests.conf`, or `/etc/default/libvirt-guests` / `/etc/sysconfig/libvirt-guests` on some distributions):
+
+```ini
+URIS="qemu:///system"
+ON_SHUTDOWN=suspend
+ON_BOOT=ignore
+```
+
+`ON_SHUTDOWN=suspend` makes libvirt do a managed save of running guests. `ON_BOOT=ignore` keeps the VM from starting at boot, so it only comes up when you launch it from the menu. When the launcher finds a VM that is shut off with a managed-save image, it starts it (libvirt restores the saved state) and syncs the clock afterwards.
+
+If you want the safest behaviour regardless of how libvirt-guests treats a VM that is paused at the moment of shutdown, use `SUSPEND_MODE=managedsave` in the launcher configuration: the saved state is then already on disk before the host goes down.
+
 ## Client notes
 
 ### KRDC
